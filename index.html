@@ -615,95 +615,73 @@
   // ====== GANTI URL INI ======
   const APPSCRIPT_URL = "https://script.google.com/a/macros/guru.smp.belajar.id/s/AKfycbxbkbdkzhFzlvisb7Djp_XgmogSl8VDqmoI2fPSWqrjxnN46KMVQ2lUo7ZEZPMhlAkPFA/exec";
   // ============================
-  
-  // Mode debug: tampilkan error detail di console & UI
-  const DEBUG_MODE = true;
 
   const container = document.getElementById('newsContainer');
-  const loader = document.getElementById('loader');
+  let beritaLoaded = false;
 
-  // Data dummy untuk fallback (tampil jika Apps Script error)
-  const DUMMY_DATA = [
-    {
-      id: 999,
-      tanggal: "26 Okt 2026",
-      judul: "Selamat Datang di Portal Berita SMPN 17 Surabaya",
-      kategori: "Pengumuman",
-      ringkasan: "Portal berita sekolah telah aktif. Berita terbaru akan ditampilkan di sini setelah Google Form dikonfigurasi dengan benar.",
-      isi: "Ini adalah berita contoh (dummy) yang muncul karena sistem belum terhubung ke Google Apps Script.\n\nSilakan periksa:\n1. URL Apps Script sudah benar\n2. Deployment 'Anyone'\n3. Sheet 'Form Responses 1' ada dan berisi data\n4. Buka URL Apps Script di browser untuk melihat error",
-      gambar: "https://via.placeholder.com/800x400/1e3a8a/ffffff?text=SMPN+17+Surabaya",
-      penulis: "Admin"
-    }
-  ];
+  // ===== JSONP LOADER (bypass CORS) =====
+  function loadBeritaJSONP() {
+    // Tampilkan loading
+    container.innerHTML = `
+      <div class="col-12 text-center py-5">
+        <div class="spinner-custom" style="width:50px;height:50px;border:4px solid #e2e8f0;border-top-color:#1e3a8a;border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 15px;"></div>
+        <p class="text-muted">Memuat berita...</p>
+      </div>`;
 
-  async function loadBerita() {
-    if (DEBUG_MODE) console.log('🔄 Memuat berita dari:', APPSCRIPT_URL);
-    
-    try {
-      // Validasi URL
-      if (!APPSCRIPT_URL || APPSCRIPT_URL.includes('XXXX')) {
-        throw new Error('URL Apps Script belum diatur. Ganti APPSCRIPT_URL di script HTML.');
-      }
+    // Buat script tag untuk JSONP
+    const scriptId = 'jsonp-berita-' + Date.now();
+    const script = document.createElement('script');
+    script.id = scriptId;
+    script.src = `${APPSCRIPT_URL}?callback=handleBeritaCallback`;
 
-      const res = await fetch(APPSCRIPT_URL, {
-        method: 'GET',
-        redirect: 'follow' // Penting: Apps Script melakukan redirect
-      });
-      
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    // Timeout 15 detik
+    const timeout = setTimeout(() => {
+      if (!beritaLoaded) {
+        showError('Timeout: Server tidak merespon dalam 15 detik. Periksa URL Apps Script.');
+        cleanupScript();
       }
-      
-      const text = await res.text();
-      if (DEBUG_MODE) console.log('📥 Response:', text.substring(0, 500));
-      
-      let json;
-      try {
-        json = JSON.parse(text);
-      } catch (parseErr) {
-        throw new Error('Response bukan JSON valid. Mungkin HTML error page. Response: ' + text.substring(0, 200));
-      }
+    }, 15000);
 
-      if (json.status === 'error') {
-        throw new Error('Apps Script error: ' + json.message);
-      }
+    // Error handler
+    script.onerror = () => {
+      clearTimeout(timeout);
+      showError('Gagal memuat script dari Apps Script. Periksa koneksi atau URL.');
+      cleanupScript();
+    };
 
-      if (!json.data || json.data.length === 0) {
-        showEmpty();
-        return;
-      }
+    document.head.appendChild(script);
 
-      renderBerita(json.data);
-      
-    } catch (err) {
-      console.error('❌ Error:', err);
-      if (DEBUG_MODE) {
-        showError(err.message);
-      } else {
-        // Fallback ke data dummy
-        renderBerita(DUMMY_DATA, true);
-      }
+    function cleanupScript() {
+      const s = document.getElementById(scriptId);
+      if (s) s.remove();
     }
   }
 
-  function renderBerita(data, isDummy = false) {
-    container.innerHTML = '';
+  // ===== CALLBACK yang dipanggil Apps Script =====
+  function handleBeritaCallback(data) {
+    beritaLoaded = true;
     
-    if (isDummy) {
-      const notice = document.createElement('div');
-      notice.className = 'col-12';
-      notice.innerHTML = `
-        <div class="alert alert-warning" style="border-left:4px solid var(--secondary);">
-          <i class="bi bi-exclamation-triangle-fill"></i> 
-          <strong>Mode Demo:</strong> Menampilkan berita contoh karena gagal terhubung ke server.
-          <button class="btn btn-sm btn-outline-dark ms-2" onclick="loadBerita()">
-            <i class="bi bi-arrow-clockwise"></i> Coba Lagi
-          </button>
-        </div>
-      `;
-      container.appendChild(notice);
+    if (data.status === 'error') {
+      showError('Error dari server: ' + data.message);
+      return;
     }
-    
+
+    if (!data.data || data.data.length === 0) {
+      container.innerHTML = `
+        <div class="col-12 text-center py-5">
+          <i class="bi bi-inbox" style="font-size:4rem;color:#cbd5e1;"></i>
+          <p class="text-muted mt-3">Belum ada berita dipublikasikan.</p>
+          <small class="text-muted">Silakan isi Google Form untuk menambah berita baru.</small>
+        </div>`;
+      return;
+    }
+
+    renderBerita(data.data);
+  }
+
+  // ===== RENDER BERITA =====
+  function renderBerita(data) {
+    container.innerHTML = '';
     data.forEach((item) => {
       const collapseId = `collapse${item.id}`;
       const card = document.createElement('div');
@@ -728,9 +706,7 @@
                 </div>
                 <p class="news-summary mb-3">${escapeHtml(item.ringkasan)}</p>
                 <div class="d-flex gap-2 flex-wrap">
-                  <button class="btn-toggle" type="button"
-                          data-bs-toggle="collapse" data-bs-target="#${collapseId}"
-                          aria-expanded="false">
+                  <button class="btn-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#${collapseId}" aria-expanded="false">
                     <i class="bi bi-chevron-down"></i> Baca Selengkapnya
                   </button>
                   <button class="btn-share" onclick="shareBerita(${item.id}, '${escapeAttr(item.judul)}')">
@@ -749,15 +725,6 @@
     });
   }
 
-  function showEmpty() {
-    container.innerHTML = `
-      <div class="col-12 text-center py-5">
-        <i class="bi bi-inbox" style="font-size:4rem;color:#cbd5e1;"></i>
-        <p class="text-muted mt-3">Belum ada berita dipublikasikan.</p>
-        <small class="text-muted">Silakan isi Google Form untuk menambah berita baru.</small>
-      </div>`;
-  }
-
   function showError(msg) {
     container.innerHTML = `
       <div class="col-12">
@@ -767,28 +734,21 @@
           <hr>
           <small>
             <strong>Cek:</strong><br>
-            1. URL Apps Script sudah diganti (bukan XXXX...)<br>
+            1. URL Apps Script sudah benar (bukan XXXX...)<br>
             2. Apps Script di-deploy sebagai "Anyone"<br>
-            3. Sheet bernama "${SHEET_NAME || 'Form Responses 1'}" ada<br>
-            4. Buka URL Apps Script di browser untuk lihat detail error<br>
-            5. Tekan F12 → tab Console untuk debug
+            3. Sheet bernama "Form Responses 1" ada<br>
+            4. Buka URL Apps Script di browser untuk lihat detail
           </small>
           <div class="mt-3">
-            <button class="btn btn-primary btn-sm" onclick="loadBerita()">
+            <button class="btn btn-primary btn-sm" onclick="loadBeritaJSONP()">
               <i class="bi bi-arrow-clockwise"></i> Coba Lagi
-            </button>
-            <button class="btn btn-outline-secondary btn-sm" onclick="loadDummy()">
-              <i class="bi bi-eye"></i> Lihat Demo
             </button>
           </div>
         </div>
       </div>`;
   }
 
-  function loadDummy() {
-    renderBerita(DUMMY_DATA, true);
-  }
-
+  // ===== UTILITIES =====
   function escapeHtml(str) {
     if (!str) return '';
     return String(str)
@@ -826,7 +786,15 @@
     setTimeout(() => t.classList.remove('show'), 2500);
   }
 
-  document.addEventListener('DOMContentLoaded', loadBerita);
+  // ===== INIT =====
+  document.addEventListener('DOMContentLoaded', () => {
+    // Validasi URL
+    if (!APPSCRIPT_URL || APPSCRIPT_URL.includes('XXXX')) {
+      showError('URL Apps Script belum diatur. Edit variabel APPSCRIPT_URL di script HTML.');
+      return;
+    }
+    loadBeritaJSONP();
+  });
 </script>
 </body>
 </html>
